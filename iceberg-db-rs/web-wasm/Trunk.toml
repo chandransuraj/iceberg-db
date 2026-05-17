@@ -1,0 +1,8 @@
+# `target` in Trunk means the HTML entry file (default: index.html), not the Rust wasm triple.
+[build]
+# Relative URLs so assets load when not served from domain root (Live Server, subpaths).
+public_url = "./"
+
+[serve]
+addresses = ["127.0.0.1"]
+port = 8080

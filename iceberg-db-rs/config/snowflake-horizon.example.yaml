@@ -1,0 +1,21 @@
+# Snowflake Horizon IRC + S3 (Iceberg tables written by Snowflake).
+# Copy to %USERPROFILE%\.iceberg-db\config.yaml and set SNOWFLAKE_ACCESS_TOKEN.
+default-catalog: snowflake_horizon
+
+catalogs:
+  snowflake_horizon:
+    type: rest
+    profile: snowflake-horizon
+    uri: https://<account>.snowflakecomputing.com/polaris/api/catalog
+    warehouse: ANALYTICS_DB
+    username: YOUR_SNOWFLAKE_USER
+    token: ${SNOWFLAKE_ACCESS_TOKEN}
+    # Must match PAT ROLE_RESTRICTION (e.g. SYSADMIN, DATA_ENGINEER).
+    scope: session:role:SYSADMIN
+    # Region where your account / Iceberg external volume lives (see Snowsight account details).
+    client.region: ap-southeast-2
+
+  # Optional local Hadoop warehouse for offline demos:
+  # local:
+  #   type: hadoop
+  #   warehouse: "C:/Users/chand/.iceberg-db/warehouse"
