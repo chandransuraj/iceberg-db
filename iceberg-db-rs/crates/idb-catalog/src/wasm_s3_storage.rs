@@ -282,7 +282,10 @@ impl WasmS3Storage {
                 "{proxy_base}/_s3?u={}",
                 urlencoding::encode(url.as_str())
             );
-            let mut rb = client.request(method, &proxy_url);
+            let mut rb = client
+                .request(method, &proxy_url)
+                .header(reqwest::header::CACHE_CONTROL, "no-cache")
+                .header(reqwest::header::PRAGMA, "no-cache");
             for (name, value) in signed.headers().iter() {
                 if name == reqwest::header::HOST {
                     continue;

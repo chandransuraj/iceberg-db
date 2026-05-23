@@ -85,6 +85,8 @@ pub async fn client_get(
         );
         let resp = client
             .get(&url)
+            .header(reqwest::header::CACHE_CONTROL, "no-cache")
+            .header(reqwest::header::PRAGMA, "no-cache")
             .header(
                 reqwest::header::AUTHORIZATION,
                 format!("Bearer {bearer}"),

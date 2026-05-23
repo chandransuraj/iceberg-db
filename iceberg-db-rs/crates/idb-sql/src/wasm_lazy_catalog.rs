@@ -1,5 +1,9 @@
 //! WASM: register Iceberg tables lazily so Connect does not load every table (and
 //! trigger moka/std::time before queries).
+//!
+//! Table metadata is reloaded from the REST catalog on every query (no in-memory cache).
+//! Iceberg tables evolve when rows are inserted in Snowflake; caching `IcebergStaticTableProvider`
+//! would keep serving the first snapshot.
 
 use std::any::Any;
 use std::collections::HashMap;
@@ -7,7 +11,6 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use dashmap::DashMap;
 use datafusion::catalog::{CatalogProvider, SchemaProvider};
 use datafusion::datasource::TableProvider;
 use datafusion::error::{DataFusionError, Result as DFResult};
@@ -86,7 +89,6 @@ struct WasmLazyIcebergSchemaProvider {
     catalog: Arc<dyn Catalog>,
     namespace: NamespaceIdent,
     table_names: Vec<String>,
-    loaded: Arc<DashMap<String, Arc<dyn TableProvider>>>,
 }
 
 impl WasmLazyIcebergSchemaProvider {
@@ -102,7 +104,6 @@ impl WasmLazyIcebergSchemaProvider {
             catalog,
             namespace,
             table_names,
-            loaded: Arc::new(DashMap::new()),
         })
     }
 
@@ -110,21 +111,15 @@ impl WasmLazyIcebergSchemaProvider {
         &self,
         table_name: &str,
     ) -> DFResult<Arc<dyn TableProvider>> {
-        if let Some(entry) = self.loaded.get(table_name) {
-            return Ok(entry.value().clone());
-        }
-
         web_sys::console::log_1(
-            &format!("idb_query: loading Iceberg table {table_name}").into(),
+            &format!("idb_query: reload Iceberg table {table_name} from catalog").into(),
         );
         let table_ident = TableIdent::new(self.namespace.clone(), table_name.to_string());
-        web_sys::console::log_1(&format!("idb_query: loadTable REST {table_name}").into());
         let table = self
             .catalog
             .load_table(&table_ident)
             .await
             .map_err(to_datafusion_error)?;
-        web_sys::console::log_1(&format!("idb_query: building scan for {table_name}").into());
         let provider = IcebergStaticTableProvider::try_new_from_table(table)
             .await
             .map_err(to_datafusion_error)?;
@@ -132,10 +127,7 @@ impl WasmLazyIcebergSchemaProvider {
             &format!("idb_query: table {table_name} ready for scan").into(),
         );
 
-        let provider: Arc<dyn TableProvider> = Arc::new(provider);
-        self.loaded
-            .insert(table_name.to_string(), provider.clone());
-        Ok(provider)
+        Ok(Arc::new(provider))
     }
 }
 

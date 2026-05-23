@@ -103,11 +103,11 @@ $status = Get-Git status --porcelain
 if ($status) {
     Write-Host "Committing ..."
     $commitMsg = @"
-Fix browser WASM queries against Snowflake Horizon Iceberg tables
+Fix browser WASM Horizon queries and reload fresh table metadata
 
-Run Horizon SQL in the browser via idb-wasm: PAT OAuth through idb-sf-proxy, lazy Iceberg
-catalog loading, S3 reads through signed GET /_s3, and iceberg runtime spawn on wasm32 using
-the JS executor so scans complete without a Tokio reactor panic.
+idb-wasm: S3 via signed GET /_s3, iceberg wasm spawn, Tokio/JS executor fixes, reload
+loadTable on every query (no stale snapshot cache), no-cache HTTP headers. push-to-github.ps1
+and rest_vended build fix.
 "@
     Invoke-Git commit -m $commitMsg
 } else {

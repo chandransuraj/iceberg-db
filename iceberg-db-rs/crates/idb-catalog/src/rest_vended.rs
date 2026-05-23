@@ -317,6 +317,12 @@ fn build_http_client(props: &HashMap<String, String>) -> Result<Client> {
         HeaderName::from_bytes(vended_name.as_bytes()).unwrap(),
         HeaderValue::from_str(vended_value).unwrap(),
     );
+    #[cfg(target_arch = "wasm32")]
+    {
+        use reqwest::header::{CACHE_CONTROL, HeaderValue, PRAGMA};
+        headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+        headers.insert(PRAGMA, HeaderValue::from_static("no-cache"));
+    }
     Client::builder()
         .default_headers(headers)
         .build()
