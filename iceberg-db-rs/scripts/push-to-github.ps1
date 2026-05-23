@@ -3,6 +3,39 @@
 
 $ErrorActionPreference = "Stop"
 
+function Invoke-Git {
+    param([Parameter(ValueFromRemainingArguments)][string[]]$Args)
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $out = & git @Args 2>&1
+        foreach ($line in $out) {
+            $text = if ($line -is [System.Management.Automation.ErrorRecord]) { "$line" } else { "$line" }
+            if ($text.Trim()) { Write-Host $text }
+        }
+        if ($LASTEXITCODE -ne 0) {
+            throw "git $($Args -join ' ') failed (exit $LASTEXITCODE)"
+        }
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+}
+
+function Get-Git {
+    param([Parameter(ValueFromRemainingArguments)][string[]]$Args)
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $lines = @(& git @Args 2>&1 | ForEach-Object { "$_" })
+        if ($LASTEXITCODE -ne 0) {
+            throw "git $($Args -join ' ') failed (exit $LASTEXITCODE)"
+        }
+        return ($lines -join "`n").Trim()
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+}
+
 $RsSrc = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $RepoPrimary = Join-Path (Split-Path $RsSrc -Parent) "iceberg-db"
 $RepoClone = Join-Path (Split-Path $RsSrc -Parent) "iceberg-db-git"
@@ -30,19 +63,19 @@ Set-Location $RepoRoot
 $branch = gh repo view "$user/iceberg-db" --json defaultBranchRef -q .defaultBranchRef.name 2>$null
 if (-not $branch) { $branch = "main" }
 
-$currentBranch = git branch --show-current 2>$null
+$currentBranch = Get-Git branch --show-current
 if (-not $currentBranch) {
-    git checkout -b $branch 2>$null
+    Invoke-Git checkout -b $branch
 } elseif ($currentBranch -ne $branch) {
-    git branch -M $branch 2>$null
+    Invoke-Git branch -M $branch
 }
 
 $userId = gh api user -q .id
 $noreplyEmail = "${userId}+${user}@users.noreply.github.com"
-$gitName = git config --global user.name
+$gitName = Get-Git config --global user.name
 if (-not $gitName) { $gitName = $user }
-git config user.email $noreplyEmail
-git config user.name $gitName
+Invoke-Git config user.email $noreplyEmail
+Invoke-Git config user.name $gitName
 Write-Host "Git author for this repo: $gitName <$noreplyEmail>"
 
 $dest = Join-Path $RepoRoot "iceberg-db-rs"
@@ -64,9 +97,9 @@ foreach ($line in @("/target/", "web-wasm/dist/")) {
 }
 
 Write-Host "Staging changes ..."
-git add iceberg-db-rs/
+Invoke-Git add iceberg-db-rs/
 
-$status = git status --porcelain
+$status = Get-Git status --porcelain
 if ($status) {
     Write-Host "Committing ..."
     $commitMsg = @"
@@ -76,28 +109,28 @@ Run Horizon SQL in the browser via idb-wasm: PAT OAuth through idb-sf-proxy, laz
 catalog loading, S3 reads through signed GET /_s3, and iceberg runtime spawn on wasm32 using
 the JS executor so scans complete without a Tokio reactor panic.
 "@
-    git commit -m $commitMsg
+    Invoke-Git commit -m $commitMsg
 } else {
     Write-Host "No file changes to commit."
 }
 
 Write-Host "Pushing to GitHub (fetch/rebase/push may take a minute on slow networks) ..."
-$remoteHeads = git ls-remote --heads origin 2>$null
+$remoteHeads = Get-Git ls-remote --heads origin
 $remoteEmpty = -not $remoteHeads
 
 if ($remoteEmpty) {
     Write-Host "Remote has no branches yet - pushing initial $branch ..."
-    git push -u origin $branch
+    Invoke-Git push -u origin $branch
 } else {
-    git fetch origin $branch 2>$null
-    $hasUpstream = git rev-parse --abbrev-ref "@{u}" 2>$null
+    Invoke-Git fetch origin $branch
+    $hasUpstream = Get-Git rev-parse --abbrev-ref '@{u}'
     if ($hasUpstream) {
-        git pull --rebase origin $branch
+        Invoke-Git pull --rebase origin $branch
     }
-    git push -u origin $branch
+    Invoke-Git push -u origin $branch
 }
 
-$sha = git rev-parse HEAD
+$sha = Get-Git rev-parse HEAD
 $url = gh repo view "$user/iceberg-db" --json url -q .url
 
 Write-Host ""
