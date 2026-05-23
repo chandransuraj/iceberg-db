@@ -99,31 +99,22 @@ fn mapping_key<'a>(mapping: &'a serde_yaml::Mapping, name: &str) -> Option<&'a s
     })
 }
 
-pub fn load(path: &Path) -> Result<AppConfig> {
-    let text = fs::read_to_string(path)
-        .with_context(|| format!("read config {}", path.display()))?;
-    let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+/// Parse catalog config from a YAML string (used by WASM and tests).
+pub fn load_str(text: &str) -> Result<AppConfig> {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let trimmed = text.trim_start();
 
     if trimmed.starts_with('{') {
         anyhow::bail!(
-            "config {} looks like JSON (starts with '{{'). Use YAML with a top-level `catalogs:` map.\n\
-Copy: iceberg-db-rs/config/local-hadoop.yaml → {}",
-            path.display(),
-            path.display()
+            "config looks like JSON (starts with '{{'). Use YAML with a top-level `catalogs:` map."
         );
     }
 
-    let root: serde_yaml::Value = serde_yaml::from_str(text).map_err(|e| {
-        anyhow::anyhow!("parse config {} (invalid YAML): {e}", path.display())
-    })?;
+    let root: serde_yaml::Value =
+        serde_yaml::from_str(text).map_err(|e| anyhow::anyhow!("parse config (invalid YAML): {e}"))?;
 
     let Some(mapping) = root.as_mapping() else {
-        anyhow::bail!(
-            "parse config {}: expected a YAML mapping at the root, got {:?}",
-            path.display(),
-            root
-        );
+        anyhow::bail!("parse config: expected a YAML mapping at the root, got {root:?}");
     };
 
     let default_catalog = mapping_key(mapping, "default-catalog")
@@ -135,32 +126,31 @@ Copy: iceberg-db-rs/config/local-hadoop.yaml → {}",
             .keys()
             .filter_map(|k| k.as_str().map(str::to_string))
             .collect();
-        anyhow::anyhow!(
-            "parse config {}: missing top-level `catalogs:` (found keys: {keys:?})",
-            path.display()
-        )
+        anyhow::anyhow!("parse config: missing top-level `catalogs:` (found keys: {keys:?})")
     })?;
 
     let catalogs: BTreeMap<String, CatalogSpec> =
         serde_yaml::from_value(catalogs_value.clone()).map_err(|e| {
             anyhow::anyhow!(
-                "parse config {} `catalogs` section: {e}\n\
-Hint: quote Windows paths, e.g. warehouse: \"C:/Users/you/.iceberg-db/warehouse\"",
-                path.display()
+                "parse config `catalogs` section: {e}\n\
+Hint: quote Windows paths, e.g. warehouse: \"C:/path/to/warehouse\""
             )
         })?;
 
     if catalogs.is_empty() {
-        anyhow::bail!(
-            "config {} has no catalogs; add at least one entry under `catalogs:`",
-            path.display()
-        );
+        anyhow::bail!("config has no catalogs; add at least one entry under `catalogs:`");
     }
 
     Ok(AppConfig {
         default_catalog,
         catalogs,
     })
+}
+
+pub fn load(path: &Path) -> Result<AppConfig> {
+    let text = fs::read_to_string(path)
+        .with_context(|| format!("read config {}", path.display()))?;
+    load_str(&text).with_context(|| format!("config {}", path.display()))
 }
 
 pub fn default_config_path() -> PathBuf {
@@ -218,6 +208,47 @@ catalogs:
         assert!(
             root.get("catalogs").is_some(),
             "catalogs key should exist; root={root:?}"
+        );
+    }
+
+    #[test]
+    fn horizon_scope_with_colons_must_be_quoted_in_yaml() {
+        let pat = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.test-pat-value-part";
+        let scope = "session:role:DATA_ENGINEER_ROLE";
+        let bad = format!(
+            r#"default-catalog: snowflake_horizon
+catalogs:
+  snowflake_horizon:
+    type: rest
+    profile: snowflake-horizon
+    uri: https://xy.snowflakecomputing.com/polaris/api/catalog
+    token: {pat}
+    scope: {scope}
+"#
+        );
+        let good = format!(
+            r#"default-catalog: snowflake_horizon
+catalogs:
+  snowflake_horizon:
+    type: rest
+    profile: snowflake-horizon
+    uri: "https://xy.snowflakecomputing.com/polaris/api/catalog"
+    token: "{pat}"
+    scope: "{scope}"
+"#
+        );
+        let bad_cfg = load_str(&bad).expect("parse");
+        let good_cfg = load_str(&good).expect("parse");
+        let bad_scope = bad_cfg.catalogs["snowflake_horizon"]
+            .property("scope")
+            .unwrap_or_default();
+        let good_scope = good_cfg.catalogs["snowflake_horizon"]
+            .property("scope")
+            .unwrap_or_default();
+        assert_eq!(good_scope, scope);
+        assert_ne!(
+            bad_scope, scope,
+            "unquoted scope/PAT YAML is ambiguous; browser must quote (got {bad_scope:?})"
         );
     }
 

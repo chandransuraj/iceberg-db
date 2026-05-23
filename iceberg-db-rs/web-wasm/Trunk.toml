@@ -6,3 +6,8 @@ public_url = "./"
 [serve]
 addresses = ["127.0.0.1"]
 port = 8080
+
+# Browser → same-origin /sf/... → snowflake-proxy.mjs → Snowflake (avoids CORS)
+[[proxy]]
+rewrite = "/sf/"
+backend = "http://127.0.0.1:8787/"

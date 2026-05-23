@@ -104,19 +104,7 @@ Use account shorthand like xy12345.us-east-1 or a full https://…snowflakecompu
 
                 "catalog '{catalog_name}': snowflake-horizon requires \
 
-`scope: session:role:<ROLE>` matching the PAT ROLE_RESTRICTION (e.g. session:role:SYSADMIN)"
-
-            ));
-
-        }
-
-        if props.get("oauth2-client-id").is_none_or(|s| s.is_empty()) {
-
-            return Err(format!(
-
-                "catalog '{catalog_name}': snowflake-horizon requires `username` (OAuth client_id), \
-
-e.g. username: CHANDRANSURAJ"
+`scope: session:role:<ROLE>` matching the PAT ROLE_RESTRICTION (e.g. session:role:DATA_ENGINEER_ROLE)"
 
             ));
 
@@ -174,7 +162,16 @@ pub fn is_snowflake_horizon_profile(profile: Option<&str>, uri: Option<&str>) ->
     {
         return true;
     }
-    uri.is_some_and(|u| u.contains("snowflakecomputing.com") && u.contains("polaris"))
+    uri.is_some_and(is_snowflake_horizon_uri)
+}
+
+/// Snowflake Horizon IRC (`…/polaris/api/catalog`), including local dev proxy URLs.
+pub fn is_snowflake_horizon_uri(uri: &str) -> bool {
+    uri.contains("/polaris/api/catalog")
+        && (uri.contains("snowflakecomputing.com")
+            || uri.contains("/sf/")
+            || uri.contains("127.0.0.1:8787")
+            || uri.contains("localhost:8787"))
 }
 
 
@@ -256,17 +253,11 @@ fn apply_snowflake_horizon(props: &mut BTreeMap<String, String>) {
 
 
     if let Some(pat) = props.remove("token") {
-
-        props.insert("credential".into(), pat);
-
+        props.insert("credential".into(), pat.trim().to_string());
     }
 
-
-
-    if let Some(scope) = props.get("scope").cloned() {
-
-        props.entry("oauth2-scope".into()).or_insert(scope);
-
+    if let Some(scope) = props.remove("scope") {
+        props.insert("oauth2-scope".into(), scope.trim().to_string());
     }
 
 
@@ -351,11 +342,34 @@ mod tests {
 
         );
 
+        assert_eq!(
+
+            props.get("oauth2-scope").map(String::as_str),
+
+            Some("session:role:SYSADMIN")
+
+        );
+
+        assert!(!props.contains_key("scope"));
+
         assert!(validate_rest_props("sf", &props, Some("snowflake-horizon")).is_ok());
 
     }
 
 
+
+    #[test]
+    fn snowflake_pat_only_without_username_validates() {
+        let props = BTreeMap::from([
+            ("uri".into(), "https://xy.snowflakecomputing.com/polaris/api/catalog".into()),
+            (
+                "credential".into(),
+                "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.pat-secret-part".into(),
+            ),
+            ("scope".into(), "session:role:DATA_ENGINEER_ROLE".into()),
+        ]);
+        assert!(validate_rest_props("sf", &props, Some("snowflake-horizon")).is_ok());
+    }
 
     #[test]
 

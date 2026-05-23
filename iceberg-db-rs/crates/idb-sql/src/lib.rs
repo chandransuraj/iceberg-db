@@ -4,6 +4,37 @@ mod case_insensitive;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm_demo;
+#[cfg(all(target_arch = "wasm32", feature = "native"))]
+mod wasm_lazy_catalog;
+
+#[cfg(target_arch = "wasm32")]
+macro_rules! wasm_query_step {
+    ($($t:tt)*) => {
+        web_sys::console::log_1(&format!("idb_query: {}", format!($($t)*)).into());
+    };
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn collect_batches_wasm(
+    df: datafusion::dataframe::DataFrame,
+) -> Result<Vec<RecordBatch>> {
+    // `collect()` avoids DataFusion `execute_stream` spawning extra tokio tasks on wasm32.
+    let batches = df.collect().await.map_err(|e| anyhow::anyhow!("{e}"))?;
+    let n: usize = batches.iter().map(|b| b.num_rows()).sum();
+    wasm_query_step!("collect finished, {} batch(es), {} row(s)", batches.len(), n);
+    Ok(batches)
+}
+
+/// DataFusion on wasm32: avoid parallel tokio tasks that never run on a single-thread runtime.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn wasm_session_config(catalog: &str, schema: &str) -> SessionConfig {
+    let mut config = SessionConfig::new()
+        .with_information_schema(true)
+        .with_create_default_catalog_and_schema(false)
+        .with_default_catalog_and_schema(catalog, schema);
+    config.options_mut().execution.target_partitions = 1;
+    config
+}
 
 use std::sync::Arc;
 
@@ -36,6 +67,8 @@ pub struct SqlSession {
     default_catalog: String,
     default_schema: String,
     iceberg_catalog: Arc<dyn Catalog>,
+    /// WASM demo uses a DataFusion memory catalog; `SHOW TABLES` reads from it.
+    wasm_demo: bool,
 }
 
 impl SqlSession {
@@ -50,7 +83,19 @@ impl SqlSession {
         let default_catalog = registry.default_name().to_string();
         let default_schema = registry.default_schema().to_string();
         let iceberg_catalog = registry.default();
-        Self::from_iceberg_catalog(default_catalog, default_schema, iceberg_catalog).await
+        #[cfg(target_arch = "wasm32")]
+        {
+            return wasm_lazy_catalog::open_wasm_horizon_session(
+                default_catalog,
+                default_schema,
+                iceberg_catalog,
+            )
+            .await;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            Self::from_iceberg_catalog(default_catalog, default_schema, iceberg_catalog).await
+        }
     }
 
     pub async fn from_iceberg_catalog(
@@ -84,6 +129,7 @@ warehouse = database name, and scope session:role:<role> matching the PAT."
             default_catalog: catalog_name,
             default_schema,
             iceberg_catalog,
+            wasm_demo: false,
         })
     }
 
@@ -101,12 +147,19 @@ warehouse = database name, and scope session:role:<role> matching the PAT."
             let schema = schema.unwrap_or_else(|| self.default_schema.clone());
             return self.show_tables(&schema, started).await;
         }
+        #[cfg(target_arch = "wasm32")]
+        wasm_query_step!("planning SQL");
         let df = self
             .ctx
             .sql(sql)
             .await
             .map_err(|e| plan_sql_error(&e, &self.default_catalog, &self.default_schema))?;
+        #[cfg(target_arch = "wasm32")]
+        wasm_query_step!("executing (Iceberg scan / S3)");
         let schema = Arc::new(df.schema().as_arrow().clone());
+        #[cfg(target_arch = "wasm32")]
+        let batches = collect_batches_wasm(df).await.context("execute sql")?;
+        #[cfg(not(target_arch = "wasm32"))]
         let batches = df.collect().await.context("execute sql")?;
         let columns = schema
             .fields()
@@ -151,16 +204,28 @@ warehouse = database name, and scope session:role:<role> matching the PAT."
     }
 
     async fn show_tables(&self, schema: &str, started: QueryTimer) -> Result<QueryResult> {
-        use iceberg::NamespaceIdent;
+        let names: Vec<String> = if self.wasm_demo {
+            let catalog = self
+                .ctx
+                .catalog(&self.default_catalog)
+                .with_context(|| format!("catalog '{}' not found", self.default_catalog))?;
+            let schema_provider = catalog
+                .schema(schema)
+                .with_context(|| format!("schema '{schema}' not found"))?;
+            schema_provider.table_names()
+        } else {
+            use iceberg::NamespaceIdent;
 
-        let namespace = NamespaceIdent::from_vec(vec![schema.to_string()])
-            .map_err(|e| anyhow::anyhow!("invalid namespace '{schema}': {e}"))?;
-        let tables = self
-            .iceberg_catalog
-            .list_tables(&namespace)
-            .await
-            .map_err(|e| anyhow::anyhow!("list tables in '{schema}': {e}"))?;
-        let names: Vec<&str> = tables.iter().map(|t| t.name()).collect();
+            let namespace = NamespaceIdent::from_vec(vec![schema.to_string()])
+                .map_err(|e| anyhow::anyhow!("invalid namespace '{schema}': {e}"))?;
+            let tables = self
+                .iceberg_catalog
+                .list_tables(&namespace)
+                .await
+                .map_err(|e| anyhow::anyhow!("list tables in '{schema}': {e}"))?;
+            tables.iter().map(|t| t.name().to_string()).collect()
+        };
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
         let schema_arrow = Arc::new(Schema::new(vec![Field::new(
             "table_name",
             DataType::Utf8,

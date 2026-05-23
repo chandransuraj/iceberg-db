@@ -14,5 +14,5 @@ clap.workspace = true
 datafusion.workspace = true
 idb-config.workspace = true
 idb-core.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread"] }
 tracing-subscriber.workspace = true
