@@ -17,6 +17,7 @@ Rust SQL engine over Apache Iceberg (browser/WASM target), developed **in parall
 | `idb-sql` | DataFusion `SessionContext` + `IcebergCatalogProvider` |
 | `idb-core` | `Engine` facade |
 | `idb-cli` | Native binary `idb` |
+| `idb-bench` | TPC-H/TPC-DS-style benchmark harness comparing `iceberg-db-rs` and DuckDB |
 | `idb-wasm` | WASM stub (browser phase 3) |
 
 ## Build & run (native)

@@ -6,6 +6,7 @@ members = [
   "crates/idb-sql",
   "crates/idb-core",
   "crates/idb-cli",
+  "crates/idb-bench",
   "crates/idb-wasm",
   "crates/idb-sf-proxy",
 ]
