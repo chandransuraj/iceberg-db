@@ -526,6 +526,14 @@ table.results-grid tbody tr:hover {
   background: var(--bg-toolbar);
 }
 
+.status-message {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .statusbar strong {
   color: var(--text);
 }

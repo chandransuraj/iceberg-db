@@ -103,11 +103,10 @@ $status = Get-Git status --porcelain
 if ($status) {
     Write-Host "Committing ..."
     $commitMsg = @"
-Fix browser WASM Horizon queries and reload fresh table metadata
+Improve WASM SQL editor: case-insensitive columns, selection run, live status logs
 
-idb-wasm: S3 via signed GET /_s3, iceberg wasm spawn, Tokio/JS executor fixes, reload
-loadTable on every query (no stale snapshot cache), no-cache HTTP headers. push-to-github.ps1
-and rest_vended build fix.
+Wrap Iceberg tables with lowercase column schemas so JOINs work with unquoted ids.
+Run only selected SQL from the editor; stream idb_query progress in the status bar.
 "@
     Invoke-Git commit -m $commitMsg
 } else {
