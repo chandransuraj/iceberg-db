@@ -492,9 +492,7 @@ fn read_queries(path: &Path, only: &[String]) -> Result<Vec<QuerySpec>> {
 fn load_duckdb_setup(args: &Args) -> Result<String> {
     let mut chunks = Vec::new();
     for file in &args.duckdb_setup_files {
-        chunks.push(
-            fs::read_to_string(file).with_context(|| format!("read {}", file.display()))?,
-        );
+        chunks.push(fs::read_to_string(file).with_context(|| format!("read {}", file.display()))?);
     }
     chunks.extend(args.duckdb_setup_sql.iter().cloned());
     Ok(chunks.join("\n"))
@@ -612,7 +610,10 @@ mod tests {
 
     #[test]
     fn escapes_sql_string_literals() {
-        assert_eq!(sql_string_literal("/tmp/o'clock.csv"), "'/tmp/o''clock.csv'");
+        assert_eq!(
+            sql_string_literal("/tmp/o'clock.csv"),
+            "'/tmp/o''clock.csv'"
+        );
     }
 
     #[test]
