@@ -201,7 +201,7 @@ fn truncate_log(s: &str, max: usize) -> String {
 #[derive(Serialize)]
 struct QueryResponse {
     row_count: usize,
-    elapsed_ms: u128,
+    elapsed_ms: u64,
     columns: Vec<ColumnDto>,
     rows: Vec<Vec<String>>,
     text: String,

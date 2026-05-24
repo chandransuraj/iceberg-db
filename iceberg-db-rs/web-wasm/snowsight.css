@@ -534,8 +534,27 @@ table.results-grid tbody tr:hover {
   white-space: nowrap;
 }
 
+.status-metric {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.status-metric-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
 .statusbar strong {
   color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.statusbar-running #status-time {
+  color: var(--accent, #3b82f6);
 }
 
 .status-ok {

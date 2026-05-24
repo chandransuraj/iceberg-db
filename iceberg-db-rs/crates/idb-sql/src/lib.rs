@@ -59,7 +59,7 @@ pub struct QueryResult {
     pub columns: Vec<ColumnInfo>,
     pub batches: Vec<RecordBatch>,
     pub row_count: usize,
-    pub elapsed_ms: u128,
+    pub elapsed_ms: u64,
 }
 
 pub struct SqlSession {
@@ -288,8 +288,8 @@ impl QueryTimer {
         };
     }
 
-    fn elapsed_ms(&self) -> u128 {
-        self.inner.elapsed().as_millis()
+    fn elapsed_ms(&self) -> u64 {
+        self.inner.elapsed().as_millis().min(u64::MAX as u128) as u64
     }
 }
 

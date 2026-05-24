@@ -273,8 +273,9 @@ function renderGrid(result) {
       const tr = document.createElement("tr");
       for (const cell of row) {
         const td = document.createElement("td");
-        td.textContent = cell ?? "";
-        td.title = cell ?? "";
+        const text = formatCell(cell);
+        td.textContent = text;
+        td.title = text;
         tr.appendChild(td);
       }
       tbody.appendChild(tr);
@@ -298,11 +299,61 @@ function setStatus({ message, kind = "muted", rows, ms }) {
   el.className = `status-message${kind === "ok" ? " status-ok" : kind === "err" ? " status-err" : ""}`;
   el.textContent = message;
   el.title = message;
-  $("status-rows").textContent = rows != null ? `${rows} row(s)` : "—";
-  $("status-time").textContent = ms != null ? `${ms} ms` : "—";
+  $("status-rows").textContent = rows != null ? `${jsNumber(rows)} row(s)` : "—";
+  if (ms != null) {
+    $("status-time").textContent = formatElapsedMs(ms);
+  } else if (!queryRunning) {
+    $("status-time").textContent = "—";
+  }
 }
 
 let queryRunning = false;
+let queryTimerInterval = null;
+
+function jsNumber(value) {
+  if (typeof value === "bigint") return Number(value);
+  if (typeof value === "number") return value;
+  if (value == null) return NaN;
+  return Number(value);
+}
+
+function formatCell(value) {
+  if (value == null) return "";
+  if (typeof value === "bigint") return value.toString();
+  return String(value);
+}
+
+function formatElapsedMs(ms) {
+  const n = jsNumber(ms);
+  const sec = Math.floor(n / 1000);
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  if (m < 60) return s > 0 ? `${m}m ${s}s` : `${m}m`;
+  const h = Math.floor(m / 60);
+  const rm = m % 60;
+  return rm > 0 || s > 0 ? `${h}h ${rm}m ${s}s` : `${h}h`;
+}
+
+function startQueryElapsedTimer(t0) {
+  stopQueryElapsedTimer();
+  const timeEl = $("status-time");
+  const bar = timeEl?.closest(".statusbar");
+  bar?.classList.add("statusbar-running");
+  const tick = () => {
+    timeEl.textContent = formatElapsedMs(performance.now() - t0);
+  };
+  tick();
+  queryTimerInterval = setInterval(tick, 1000);
+}
+
+function stopQueryElapsedTimer() {
+  if (queryTimerInterval != null) {
+    clearInterval(queryTimerInterval);
+    queryTimerInterval = null;
+  }
+  $("status-time")?.closest(".statusbar")?.classList.remove("statusbar-running");
+}
 
 function setQueryStep(step) {
   if (!queryRunning) return;
@@ -364,16 +415,34 @@ async function runQuery() {
   queryRunning = true;
   setRunning(true);
   setStatus({ message: "Running…", kind: "muted" });
+  const t0 = performance.now();
+  startQueryElapsedTimer(t0);
+  const queryPromise = idb_query(sql);
+  /** After this, keep awaiting WASM; only the status message changes. */
+  const QUERY_UI_WAIT_MS = 10 * 60 * 1000;
+  const UI_TIMEOUT = "IDB_UI_TIMEOUT";
   try {
-    const result = await Promise.race([
-      idb_query(sql),
-      new Promise((_, reject) =>
-        setTimeout(
-          () => reject(new Error("Query timed out after 120s — check console for idb_query: logs")),
-          120_000
-        )
-      ),
-    ]);
+    let result;
+    try {
+      result = await Promise.race([
+        queryPromise,
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error(UI_TIMEOUT)), QUERY_UI_WAIT_MS)
+        ),
+      ]);
+    } catch (raceErr) {
+      if (!(raceErr instanceof Error && raceErr.message === UI_TIMEOUT)) {
+        throw raceErr;
+      }
+      const waitedSec = Math.round((performance.now() - t0) / 1000);
+      setStatus({
+        message: `Still running (${waitedSec}s) — large Iceberg scan; see console`,
+        kind: "muted",
+      });
+      $("results-grid-wrap").innerHTML =
+        '<div class="empty-state">Query still running (S3 parquet scan). Results will appear when finished.</div>';
+      result = await queryPromise;
+    }
     console.info("[iceberg-db] runQuery ok", result?.row_count, "rows");
     pushHistory(sql);
     renderGrid(result);
@@ -389,9 +458,14 @@ async function runQuery() {
     const msg = String(e);
     $("results-grid-wrap").innerHTML = `<div class="empty-state" style="color:var(--error)">${escapeHtml(msg)}</div>`;
     $("out-text").textContent = msg;
-    setStatus({ message: "Failed", kind: "err" });
+    setStatus({
+      message: "Failed",
+      kind: "err",
+      ms: Math.round(performance.now() - t0),
+    });
     switchResultsTab("text");
   } finally {
+    stopQueryElapsedTimer();
     queryRunning = false;
     setRunning(false);
   }
